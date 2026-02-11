@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "YT Email Scraper",
+  "version": "1.1.0",
+  "description": "Floating panel to extract Name, Link & Email from YouTube channels.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Toggle YT Email Scraper"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
