@@ -13,6 +13,14 @@
     } catch { return false; }
   }
 
+  function isVideoPage(url) {
+    try {
+      const u = new URL(url);
+      if (u.hostname !== "www.youtube.com") return false;
+      return u.pathname === "/watch" && u.searchParams.has("v");
+    } catch { return false; }
+  }
+
   function tryExpandDescription() {
     // 1. Expand any "Show more" / "more" buttons already visible
     const expandSels = [
@@ -113,11 +121,8 @@
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
   }
 
-  async function scrape() {
-    if (!isChannelPage(window.location.href))
-      return { ok: false, error: "Not on a channel page." };
-
-    // Capture URL before we start — YouTube SPA may still be loading
+  /* ---------- CHANNEL PAGE SCRAPER ---------- */
+  async function scrapeChannelPage() {
     const urlBefore = getChannelUrl();
 
     // Step 0: Close any stale about popup left over from a previous channel
@@ -128,7 +133,6 @@
     const headerEmails = extractEmails(getHeaderText());
 
     // Step 2: Snapshot all emails currently in the DOM BEFORE opening the about popup.
-    //         This captures any stale emails from previous channels' leftover renderers.
     const emailsBefore = snapshotAllEmails();
 
     // Step 3: Open the about popup for THIS channel
@@ -136,7 +140,6 @@
     await new Promise(r => setTimeout(r, 1200));
 
     // Step 4: Snapshot all emails AFTER the popup opened.
-    //         New emails = emails that appeared ONLY after we opened the popup.
     const emailsAfter = snapshotAllEmails();
     const freshPopupEmails = [];
     for (const em of emailsAfter) {
@@ -148,15 +151,169 @@
 
     // Combine: safe header emails + only the FRESH emails from the popup
     const allEmails = new Set([...headerEmails, ...freshPopupEmails]);
-    // Filter out image-like false positives
     const filtered = Array.from(allEmails).filter(e => !e.endsWith('.png') && !e.endsWith('.jpg') && !e.endsWith('.svg'));
 
-    // Verify we're still on the same page
     const urlAfter = getChannelUrl();
     if (urlBefore !== urlAfter)
       return { ok: false, error: "Page changed during scan. Try again." };
 
     return { ok: true, channelUrl: urlAfter, channelName: extractChannelName(), emails: filtered };
+  }
+
+  /* ---------- VIDEO PAGE SCRAPER ---------- */
+  function expandVideoDescription() {
+    // Click "...more" button to expand the video description
+    const expandSels = [
+      'ytd-text-inline-expander #expand',                    // modern expand button
+      'tp-yt-paper-button#expand',                           // older expand
+      'ytd-text-inline-expander tp-yt-paper-button#expand',  // scoped expand
+      '#description-inline-expander #expand',                // another variant
+      'ytd-watch-metadata [aria-label="Show more"]',         // aria label variant
+      '#snippet #expand',                                    // snippet expand
+    ];
+    for (const s of expandSels) {
+      const btn = document.querySelector(s);
+      if (btn) { try { btn.click(); } catch {} return; }
+    }
+  }
+
+  function collapseVideoDescription() {
+    const collapseSels = [
+      'ytd-text-inline-expander #collapse',
+      'tp-yt-paper-button#collapse',
+      '#description-inline-expander #collapse',
+      '#snippet #collapse',
+    ];
+    for (const s of collapseSels) {
+      const btn = document.querySelector(s);
+      if (btn) { try { btn.click(); } catch {} return; }
+    }
+  }
+
+  function getVideoChannelName() {
+    // On a video page, the channel name is in the owner section
+    const sels = [
+      'ytd-video-owner-renderer #channel-name yt-formatted-string a',
+      'ytd-video-owner-renderer #channel-name a',
+      '#owner ytd-channel-name a',
+      '#owner #channel-name a',
+      'ytd-video-owner-renderer ytd-channel-name yt-formatted-string',
+    ];
+    for (const s of sels) {
+      const e = document.querySelector(s);
+      if (e && e.textContent && e.textContent.trim()) return e.textContent.trim();
+    }
+    // Fallback: meta tag (may contain video title, not channel name)
+    const meta = document.querySelector("meta[itemprop='author']");
+    if (meta) {
+      const link = meta.closest('[itemprop="author"]');
+      if (link) {
+        const name = link.querySelector('[itemprop="name"]');
+        if (name && name.content) return name.content.trim();
+      }
+    }
+    return "";
+  }
+
+  function getVideoChannelUrl() {
+    // Get the channel URL from the channel link on the video page
+    const sels = [
+      'ytd-video-owner-renderer #channel-name yt-formatted-string a',
+      'ytd-video-owner-renderer #channel-name a',
+      '#owner ytd-channel-name a',
+      '#owner #channel-name a',
+      'ytd-video-owner-renderer a.yt-simple-endpoint',
+    ];
+    for (const s of sels) {
+      const a = document.querySelector(s);
+      if (a && a.href) {
+        // Normalize to channel root URL
+        const m = a.href.match(/(https:\/\/www\.youtube\.com\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+))/);
+        if (m) return m[1];
+      }
+    }
+    return "";
+  }
+
+  function getVideoDescriptionText() {
+    const parts = [];
+    // Video description containers
+    const descSels = [
+      'ytd-text-inline-expander .content',                        // expanded description content
+      'ytd-text-inline-expander #plain-snippet-text',             // plain text snippet
+      'ytd-text-inline-expander',                                 // whole expander
+      '#description-inline-expander',                             // description container
+      'ytd-watch-metadata #description',                          // watch metadata description
+      'ytd-watch-metadata #description-inner',                    // inner description
+      '#meta-contents ytd-expander #content',                     // older layout
+    ];
+    for (const s of descSels) {
+      const el = document.querySelector(s);
+      if (el && el.innerText && el.innerText.trim().length > 20) {
+        parts.push(el.innerText);
+        break; // Use the first substantial match
+      }
+    }
+
+    // Meta description tag
+    const meta = document.querySelector("meta[property='og:description']");
+    if (meta && meta.content) parts.push(meta.content);
+
+    // mailto: links in the description area
+    const descArea = document.querySelector('ytd-text-inline-expander') || document.querySelector('#description-inline-expander');
+    if (descArea) {
+      descArea.querySelectorAll('a[href^="mailto:"]').forEach(a => {
+        const em = a.href.replace('mailto:', '').split('?')[0]; if (em) parts.push(em);
+      });
+    }
+
+    return parts.join('\n');
+  }
+
+  async function scrapeVideoPage() {
+    // Step 0: Snapshot emails BEFORE expanding description (captures stale ones)
+    const emailsBefore = snapshotAllEmails();
+
+    // Step 1: Expand the video description
+    expandVideoDescription();
+    await new Promise(r => setTimeout(r, 800));
+
+    // Step 2: Snapshot emails AFTER expanding — diff gives us fresh description emails
+    const emailsAfter = snapshotAllEmails();
+    const freshDescEmails = [];
+    for (const em of emailsAfter) {
+      if (!emailsBefore.has(em)) freshDescEmails.push(em);
+    }
+
+    // Step 3: Also directly scrape the description text for emails
+    //         (handles case where description was already expanded)
+    const descText = getVideoDescriptionText();
+    const descEmails = extractEmails(descText);
+
+    // Step 4: Collapse the description so we don't leave it expanded
+    collapseVideoDescription();
+
+    // Combine diff emails + direct description emails
+    const allEmails = new Set([...freshDescEmails, ...descEmails]);
+    const filtered = Array.from(allEmails).filter(e => !e.endsWith('.png') && !e.endsWith('.jpg') && !e.endsWith('.svg'));
+
+    const channelName = getVideoChannelName();
+    const channelUrl = getVideoChannelUrl();
+
+    return {
+      ok: true,
+      channelUrl: channelUrl || window.location.href,
+      channelName: channelName || "Unknown Channel",
+      emails: filtered,
+    };
+  }
+
+  /* ---------- MAIN SCRAPE ROUTER ---------- */
+  async function scrape() {
+    const url = window.location.href;
+    if (isChannelPage(url)) return scrapeChannelPage();
+    if (isVideoPage(url)) return scrapeVideoPage();
+    return { ok: false, error: "Not on a channel or video page." };
   }
 
   /* ============================================================
@@ -180,7 +337,7 @@
         </div>
       </div>
       <div id="yts-body">
-        <button id="yts-scan">Scan This Channel</button>
+        <button id="yts-scan">Scan This Page</button>
         <div id="yts-status"></div>
         <div id="yts-result" class="yts-hidden">
           <div class="yts-field"><span class="yts-lbl">NAME</span><span id="yts-name" class="yts-val">-</span></div>
