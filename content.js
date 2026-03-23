@@ -353,15 +353,6 @@
               <button id="yts-clear">Clear</button>
             </div>
           </div>
-          <div id="yts-manual-add">
-            <div class="yts-manual-title">Manual add</div>
-            <div class="yts-manual-grid">
-              <input id="yts-manual-email" type="email" placeholder="Email *" />
-              <input id="yts-manual-name" type="text" placeholder="Name (optional)" />
-              <input id="yts-manual-link" type="url" placeholder="Channel link (optional)" />
-              <button id="yts-manual-save">Add</button>
-            </div>
-          </div>
           <div id="yts-list"></div>
         </div>
       </div>
@@ -408,20 +399,17 @@
       #yts-list-btns button { border:0; padding:3px 7px; border-radius:4px; background:#2a2a35; color:#ccc;
         font-size:10px; cursor:pointer; }
       #yts-list-btns button:hover { background:#3a3a48; }
-      #yts-manual-add { margin-bottom:8px; padding:8px; background:#111118; border:1px solid #242430; border-radius:8px; }
-      .yts-manual-title { font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:#888; margin-bottom:6px; }
-      .yts-manual-grid { display:grid; grid-template-columns:1fr auto; gap:6px; }
-      .yts-manual-grid input { min-width:0; border:1px solid #2f2f3b; background:#1a1a24; color:#f5f5f5; border-radius:6px; padding:7px 8px; font-size:11px; }
-      .yts-manual-grid input::placeholder { color:#666; }
-      #yts-manual-email, #yts-manual-name, #yts-manual-link { grid-column:1 / span 2; }
-      #yts-manual-save { border:0; padding:7px 10px; border-radius:6px; background:#2a2a35; color:#fff; font-size:11px; cursor:pointer; justify-self:end; }
-      #yts-manual-save:hover { background:#3a3a48; }
-      #yts-list { max-height:180px; overflow-y:auto; }
-      .yts-row { display:flex; align-items:center; gap:5px; padding:3px 0; border-bottom:1px solid #1e1e26; font-size:11px; }
+      #yts-list { max-height:220px; overflow-y:auto; }
+      .yts-row { display:grid; grid-template-columns:16px minmax(0,1fr) minmax(0,1fr) auto; gap:5px; padding:5px 0; border-bottom:1px solid #1e1e26; font-size:11px; align-items:center; }
       .yts-row-num { color:#555; min-width:16px; text-align:right; flex-shrink:0; }
-      .yts-row-name { color:#eee; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .yts-row-email { color:#4fc3f7; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:right; }
+      .yts-row-name { color:#eee; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .yts-row-email { color:#4fc3f7; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:right; }
       .yts-row-email.none { color:#555; }
+      .yts-row-email-edit { display:flex; gap:6px; align-items:center; min-width:0; }
+      .yts-row-email-input { flex:1; min-width:0; border:1px solid #2f2f3b; background:#1a1a24; color:#f5f5f5; border-radius:6px; padding:6px 8px; font-size:11px; }
+      .yts-row-email-input::placeholder { color:#666; }
+      .yts-row-save { border:0; padding:6px 8px; border-radius:6px; background:#2a2a35; color:#fff; font-size:10px; cursor:pointer; }
+      .yts-row-save:hover { background:#3a3a48; }
       .yts-row-del { background:none; border:0; color:#555; font-size:13px; cursor:pointer; padding:0 2px; flex-shrink:0; }
       .yts-row-del:hover { color:#ff4444; }
       .yts-empty { font-size:11px; color:#555; text-align:center; padding:6px 0; }
@@ -462,6 +450,17 @@
     saveList(); renderList();
   }
 
+  function updateRowEmail(index, email) {
+    const item = collectedList[index];
+    if (!item) return false;
+    const trimmedEmail = (email || "").trim();
+    if (!trimmedEmail) return false;
+    collectedList[index] = { ...item, email: trimmedEmail };
+    saveList();
+    renderList();
+    return true;
+  }
+
   function renderList() {
     const countEl = document.getElementById("yts-count");
     const listEl = document.getElementById("yts-list");
@@ -471,53 +470,47 @@
     if (!collectedList.length) { listEl.innerHTML = '<div class="yts-empty">No channels yet</div>'; return; }
     collectedList.forEach((item, i) => {
       const hasEmail = item.email && item.email !== "";
-      const displayName = item.name || item.link || "Manual entry";
+      const displayName = item.name || item.link || "Channel";
       const row = document.createElement("div"); row.className = "yts-row";
-      row.innerHTML = `<span class="yts-row-num">${i+1}</span><span class="yts-row-name" title="${esc(item.link || displayName)}">${esc(displayName)}</span><span class="yts-row-email ${hasEmail?"":"none"}">${hasEmail?esc(item.email):"-"}</span><button class="yts-row-del" data-idx="${i}">&times;</button>`;
+      row.innerHTML = `
+        <span class="yts-row-num">${i+1}</span>
+        <span class="yts-row-name" title="${esc(item.link || displayName)}">${esc(displayName)}</span>
+        ${hasEmail
+          ? `<span class="yts-row-email" title="${esc(item.email)}">${esc(item.email)}</span>`
+          : `<div class="yts-row-email-edit"><input class="yts-row-email-input" data-idx="${i}" type="email" placeholder="Add email" /><button class="yts-row-save" data-idx="${i}">Save</button></div>`}
+        <button class="yts-row-del" data-idx="${i}">&times;</button>`;
       listEl.appendChild(row);
     });
     listEl.querySelectorAll(".yts-row-del").forEach(b => b.addEventListener("click", e => {
-      collectedList.splice(parseInt(e.target.dataset.idx), 1); saveList(); renderList();
+      collectedList.splice(parseInt(e.target.dataset.idx, 10), 1); saveList(); renderList();
+    }));
+    listEl.querySelectorAll(".yts-row-save").forEach(b => b.addEventListener("click", e => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      const input = listEl.querySelector(`.yts-row-email-input[data-idx="${idx}"]`);
+      const email = input ? input.value : "";
+      if (!updateRowEmail(idx, email)) {
+        if (input) input.focus();
+        setStatus("Enter an email for that row.", true);
+        return;
+      }
+      setStatus("Email saved.");
+    }));
+    listEl.querySelectorAll(".yts-row-email-input").forEach(input => input.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const idx = parseInt(e.target.dataset.idx, 10);
+      if (!updateRowEmail(idx, e.target.value)) {
+        e.target.focus();
+        setStatus("Enter an email for that row.", true);
+        return;
+      }
+      setStatus("Email saved.");
     }));
   }
 
   function setStatus(txt, err) {
     const el = document.getElementById("yts-status"); if (!el) return;
     el.textContent = txt; el.style.color = err ? "#ff4444" : "#a0a0a0";
-  }
-
-  function clearManualForm() {
-    ["yts-manual-email", "yts-manual-name", "yts-manual-link"].forEach(id => {
-      const input = document.getElementById(id);
-      if (input) input.value = "";
-    });
-  }
-
-  function saveManualEntry() {
-    const emailInput = document.getElementById("yts-manual-email");
-    const nameInput = document.getElementById("yts-manual-name");
-    const linkInput = document.getElementById("yts-manual-link");
-    if (!emailInput || !nameInput || !linkInput) return;
-
-    const email = emailInput.value.trim();
-    const name = nameInput.value.trim();
-    const link = linkInput.value.trim();
-
-    if (!email) {
-      emailInput.focus();
-      setStatus("Manual add needs an email.", true);
-      return;
-    }
-
-    addToList({
-      id: link ? null : `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name,
-      link,
-      email
-    });
-    clearManualForm();
-    emailInput.focus();
-    setStatus("Manual entry added.");
   }
 
   function wireEvents() {
@@ -553,17 +546,6 @@
       document.getElementById("yts-result").classList.remove("yts-hidden");
       setStatus("Done. Added to list.");
       addToList({ name, link, email: emails.join(", ") });
-    });
-
-    // Manual add
-    document.getElementById("yts-manual-save").addEventListener("click", saveManualEntry);
-    ["yts-manual-email", "yts-manual-name", "yts-manual-link"].forEach(id => {
-      document.getElementById(id).addEventListener("keydown", e => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          saveManualEntry();
-        }
-      });
     });
 
     // Copy list
